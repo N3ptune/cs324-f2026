@@ -106,16 +106,86 @@ void eval(char *cmdline)
 	int cmds[MAXARGS];
 	int stdin_redir[MAXARGS];
 	int stdout_redir[MAXARGS];
+	pid_t pids[MAXARGS];
+	int pipefd[2];
+	int prev_read = -1;
+	pid_t pgid = 0;
+	int num_cmds, i, fd;
+
 
 	parseline(cmdline, argv);
 	if (argv[0] == NULL) {
 		return;   /* ignore empty lines */
 	}
-	parseargs(argv, cmds, stdin_redir, stdout_redir);
+	num_cmds = parseargs(argv, cmds, stdin_redir, stdout_redir);
 
 	if (builtin_cmd(&argv[cmds[0]])) {
 		return;
 	}
+
+	for (i = 0; i < num_cmds; i++) {
+		if (i < num_cmds - 1) {
+			if (pipe(pipefd) < 0) {
+				unix_error("pipe error");
+			}
+		}
+
+		pid_t pid = fork();
+		if (pid < 0)
+			unix_error("fork error");
+
+		if (pid == 0) {
+			/* child */
+			setpgid(0, i == 0 ? 0 : pgid);
+
+			/* stdin: file (first cmd only) or previous pipe */
+			if (stdin_redir[i] >= 0) {
+				if ((fd = open(argv[stdin_redir[i]], O_RDONLY)) < 0)
+					unix_error("open error");
+				dup2(fd, STDIN_FILENO);
+				close(fd);
+			} else if (prev_read >= 0) {
+				dup2(prev_read, STDIN_FILENO);
+			}
+			if (prev_read >= 0)
+				close(prev_read);
+
+			/* stdout: file (last cmd only) or next pipe */
+			if (stdout_redir[i] >= 0) {
+				if ((fd = open(argv[stdout_redir[i]],
+						O_WRONLY | O_CREAT | O_TRUNC, 0600)) < 0)
+					unix_error("open error");
+				dup2(fd, STDOUT_FILENO);
+				close(fd);
+			} else if (i < num_cmds - 1) {
+				dup2(pipefd[1], STDOUT_FILENO);
+			}
+			if (i < num_cmds - 1) {
+				close(pipefd[0]);
+				close(pipefd[1]);
+			}
+
+			execve(argv[cmds[i]], &argv[cmds[i]], environ);
+			fprintf(stderr, "%s: Command not found\n", argv[cmds[i]]);
+			exit(1);
+		}
+
+		/* parent */
+		if (i == 0)
+			pgid = pid;
+		setpgid(pid, pgid);
+		pids[i] = pid;
+
+		if (prev_read >= 0)
+			close(prev_read);
+		if (i < num_cmds - 1) {
+			close(pipefd[1]);
+			prev_read = pipefd[0];
+		}
+	}
+
+	for (i = 0; i < num_cmds; i++)
+		waitpid(pids[i], NULL, 0);
 }
 
 /* 
