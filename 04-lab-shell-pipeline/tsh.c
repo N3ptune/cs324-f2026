@@ -1,7 +1,7 @@
 /* 
  * tsh - A tiny shell program with job control
  * 
- * <Put your name and login ID here>
+ * Jason Brooks fat3s
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <fcntl.h>
 
 /* Misc manifest constants */
 #define MAXLINE    1024   /* max line size */
@@ -101,7 +102,20 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
-	return;
+	char *argv[MAXARGS];
+	int cmds[MAXARGS];
+	int stdin_redir[MAXARGS];
+	int stdout_redir[MAXARGS];
+
+	parseline(cmdline, argv);
+	if (argv[0] == NULL) {
+		return;   /* ignore empty lines */
+	}
+	parseargs(argv, cmds, stdin_redir, stdout_redir);
+
+	if (builtin_cmd(&argv[cmds[0]])) {
+		return;
+	}
 }
 
 /* 
@@ -228,7 +242,10 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
-	return 0;     /* not a builtin command */
+	if (strcmp(argv[0], "quit") == 0) {
+		exit(0);
+	}
+	return 0;	 /* not a builtin command */
 }
 
 /***********************
