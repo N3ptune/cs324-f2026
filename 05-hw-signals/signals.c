@@ -75,6 +75,7 @@ void install_sig_handlers() {
 	struct sigaction sigact;
 
 	// zero out flags
+	sigemptyset(&sigact.sa_mask);
 	sigact.sa_flags = SA_RESTART;
 
 	sigact.sa_handler = sig_handler1;
