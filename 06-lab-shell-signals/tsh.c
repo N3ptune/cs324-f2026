@@ -165,8 +165,46 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
-	return;
-}
+	char *argv[MAXARGS];
+	int bg;
+	pid_t pid;
+	sigset_t mask, prev;
+
+	bg = parseline(cmdline, argv);
+	if (argv[0] == NULL)
+		return;
+	if (builtin_cmd(argv))
+		return;
+
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGCHLD);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGTSTP);
+	sigprocmask(SIG_BLOCK, &mask, &prev);
+
+	if ((pid = fork()) < 0)
+		unix_error("fork error");
+
+	if (pid == 0) {
+		sigprocmask(SIG_SETMASK, &prev, NULL);
+		setpgid(0, 0);
+		if (execve(argv[0], argv, environ) < 0) {
+			printf("%s: Command not found\n", argv[0]);
+			exit(0);
+		}
+	}
+
+	setpgid(pid, pid);
+	addjob(jobs, pid, bg ? BG : FG, cmdline);
+	sigprocmask(SIG_SETMASK, &prev, NULL);
+
+	if (!bg) {
+		waitpid(pid, NULL, 0);
+		deletejob(jobs, pid);
+	} else {
+		printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
+	}
+ }
 
 /* 
  * parseline - Parse the command line and build the argv array.
@@ -231,7 +269,17 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
-	return 0;     /* not a builtin command */
+	if (!strcmp(argv[0], "quit"))
+	exit(0);
+	if (!strcmp(argv[0], "fg") || !strcmp(argv[0], "bg")){
+		do_bgfg(argv);
+		return 1;
+	}
+	if (!strcmp(argv[0], "jobs")) {
+		listjobs(jobs);
+		return 1;
+	}
+	return 0;
 }
 
 /* 
