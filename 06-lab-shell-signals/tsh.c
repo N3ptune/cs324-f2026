@@ -199,8 +199,7 @@ void eval(char *cmdline)
 	sigprocmask(SIG_SETMASK, &prev, NULL);
 
 	if (!bg) {
-		waitpid(pid, NULL, 0);
-		deletejob(jobs, pid);
+		waitfg(pid);
 	} else {
 		printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
 	}
@@ -295,7 +294,8 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
-	return;
+	while (fgpid(jobs) == pid)
+		sleep(1);
 }
 
 /*****************
@@ -311,7 +311,26 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
-	return;
+	int olderrno = errno;
+	int status;
+	pid_t pid;
+	struct job_t *job;
+
+	while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
+		if (WIFSTOPPED(status)) {
+			if ((job = getjobpid(jobs, pid)) != NULL)
+				job->state = ST;
+			printf("Job [%d] (%d) stopped by signal %d\n",
+					pid2jid(pid), pid, WSTOPSIG(status));
+		} else if (WIFSIGNALED(status)) {
+			printf("Job [%d] (%d) terminated by signal %d\n",
+					pid2jid(pid), pid, WTERMSIG(status));
+			deletejob(jobs, pid);
+		} else if (WIFEXITED(status)) {
+			deletejob(jobs, pid);
+		}
+	}
+	errno = olderrno;
 }
 
 /* 
